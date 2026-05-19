@@ -50,7 +50,8 @@ data class ContainerInfo(
     val blockNestedNs: Boolean = false,
     val staticNatIp: String = "",
     val privileged: String = "",
-    val customInit: String = ""
+    val customInit: String = "",
+    val uuid: String = ""
 ) {
     val isRunning: Boolean
         get() = status == ContainerStatus.RUNNING
@@ -103,6 +104,9 @@ data class ContainerInfo(
         }
         if (customInit.isNotEmpty()) {
             appendLine("custom_init=$customInit")
+        }
+        if (uuid.isNotEmpty()) {
+            appendLine("uuid=$uuid")
         }
     }
 }
@@ -298,7 +302,8 @@ object ContainerManager {
                 blockNestedNs = configMap["block_nested_ns"] == "1",
                 staticNatIp = configMap["static_nat_ip"] ?: "",
                 privileged = configMap["privileged"] ?: "",
-                customInit = configMap["custom_init"] ?: ""
+                customInit = configMap["custom_init"] ?: "",
+                uuid = configMap["uuid"] ?: ""
             )
         } catch (e: Exception) {
             return null
@@ -417,7 +422,18 @@ object ContainerManager {
             val configPath = "$CONTAINERS_BASE_PATH/$sanitizedName/${Constants.CONTAINER_CONFIG_FILE}"
 
             // Build new config content using the shared method
-            val configContent = newConfig.toConfigContent()
+            // Preserve the existing UUID -- never overwrite it with an empty value
+            val configToWrite = if (newConfig.uuid.isNotEmpty()) {
+                newConfig
+            } else {
+                val existingContent = Shell.cmd("cat \"$configPath\" 2>/dev/null").exec()
+                    .out.joinToString("\n")
+                val existingUuid = existingContent.lines()
+                    .firstOrNull { it.startsWith("uuid=") }
+                    ?.removePrefix("uuid=")?.trim() ?: ""
+                newConfig.copy(uuid = existingUuid)
+            }
+            val configContent = configToWrite.toConfigContent()
 
             // Handle .env file
             val envFilePath = "${getContainerDirectory(containerName)}/.env"

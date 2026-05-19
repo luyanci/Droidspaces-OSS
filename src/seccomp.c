@@ -31,7 +31,7 @@
  * Applied unconditionally to all kernels and all modes.
  */
 int ds_seccomp_apply_minimal(int hw_access, int privileged_mask) {
-  static struct sock_filter filter[72];
+  static struct sock_filter filter[84];
   int curr = 0;
 
   /* 1. Validate Architecture */
@@ -150,9 +150,53 @@ int ds_seccomp_apply_minimal(int hw_access, int privileged_mask) {
     filter[curr++] = (struct sock_filter)BPF_STMT(
         BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr));
 
+    /*
+     * 10. Block host clock modification syscalls.
+     *
+     * CAP_SYS_TIME dropped from the bounding set is insufficient: the kernel
+     * checks the capability against the *initial* user namespace, and
+     * Droidspaces containers run as real root without a user namespace, so
+     * the check passes even after the bounding-set drop.  Seccomp is the
+     * only reliable barrier.
+     *
+     * Blocked: settimeofday, adjtimex, clock_settime, clock_adjtime,
+     *          clock_settime64 (32-bit ARM compat, ifdef-guarded).
+     * TZ changes (/etc/localtime, TZ env) are pure userspace and unaffected.
+     */
+#ifdef __NR_settimeofday
+    filter[curr++] = (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K,
+                                                  __NR_settimeofday, 0, 1);
+    filter[curr++] = (struct sock_filter)BPF_STMT(
+        BPF_RET | BPF_K, SECCOMP_RET_ERRNO | (EPERM & SECCOMP_RET_DATA));
+#endif
+#ifdef __NR_adjtimex
+    filter[curr++] = (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K,
+                                                  __NR_adjtimex, 0, 1);
+    filter[curr++] = (struct sock_filter)BPF_STMT(
+        BPF_RET | BPF_K, SECCOMP_RET_ERRNO | (EPERM & SECCOMP_RET_DATA));
+#endif
+#ifdef __NR_clock_settime
+    filter[curr++] = (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K,
+                                                  __NR_clock_settime, 0, 1);
+    filter[curr++] = (struct sock_filter)BPF_STMT(
+        BPF_RET | BPF_K, SECCOMP_RET_ERRNO | (EPERM & SECCOMP_RET_DATA));
+#endif
+#ifdef __NR_clock_adjtime
+    filter[curr++] = (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K,
+                                                  __NR_clock_adjtime, 0, 1);
+    filter[curr++] = (struct sock_filter)BPF_STMT(
+        BPF_RET | BPF_K, SECCOMP_RET_ERRNO | (EPERM & SECCOMP_RET_DATA));
+#endif
+#ifdef __NR_clock_settime64
+    filter[curr++] = (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K,
+                                                  __NR_clock_settime64, 0, 1);
+    filter[curr++] = (struct sock_filter)BPF_STMT(
+        BPF_RET | BPF_K, SECCOMP_RET_ERRNO | (EPERM & SECCOMP_RET_DATA));
+#endif
+
     if (!hw_access) {
       /*
-       * 10. Block mknod/mknodat for block/char devices.  The container's
+       * 11. Block mknod/mknodat for block/char devices.  The container's
        * /dev tmpfs is mounted without MS_NODEV (so pre-populated device
        * nodes work), which means CAP_MKNOD-equipped processes inside can
        * create arbitrary block devices (e.g. /dev/sda, major 8 minor 0)

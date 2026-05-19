@@ -459,7 +459,21 @@ int start_rootfs(struct ds_config *cfg) {
     goto cleanup;
   }
 
-  generate_uuid(cfg->uuid, sizeof(cfg->uuid));
+  {
+    char active_uuids[DS_MAX_CONTAINERS][DS_UUID_LEN + 1];
+    int uuid_count = collect_active_uuids(active_uuids, DS_MAX_CONTAINERS);
+    int need_new = (cfg->uuid[0] == '\0');
+    if (!need_new) {
+      for (int _i = 0; _i < uuid_count; _i++) {
+        if (strcmp(cfg->uuid, active_uuids[_i]) == 0) {
+          need_new = 1;
+          break;
+        }
+      }
+    }
+    if (need_new)
+      generate_uuid(cfg->uuid, sizeof(cfg->uuid));
+  }
 
   /* Resolve and lock in the container's static NAT IP before the first save.
    *
@@ -1169,6 +1183,7 @@ int start_rootfs(struct ds_config *cfg) {
        * the same memory.  The DHCP thread is intentionally joinable so stop()
        * can join before memset. */
       ds_dhcp_server_stop();
+      ds_socketd_record_core_event("restart", cfg->container_name, cfg->uuid);
 
       goto reboot_loop;
     }
@@ -1305,6 +1320,7 @@ int start_rootfs(struct ds_config *cfg) {
     }
 
     show_info(cfg, 1);
+    ds_socketd_record_core_event("start", cfg->container_name, cfg->uuid);
     ds_log("Container '%s' is running in background.", cfg->container_name);
     if (is_android()) {
       ds_log("Use 'su -c \"%s --name='%s' enter\"' to connect.", cfg->prog_name,
@@ -1515,6 +1531,7 @@ int stop_rootfs(struct ds_config *cfg, int skip_unmount) {
 
   /* 5. Complete resource cleanup. */
   cleanup_container_resources(cfg, pid, skip_unmount, unkillable);
+  ds_socketd_record_core_event("die", cfg->container_name, cfg->uuid);
 
   if (!cfg->foreground)
     ds_log("Container '%s' stopped.", cfg->container_name);

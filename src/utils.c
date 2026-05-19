@@ -6,6 +6,7 @@
  */
 
 #include "droidspace.h"
+#include "socketd_protocol.h"
 #include <ftw.h>
 #include <sys/xattr.h>
 #include <time.h>
@@ -1245,20 +1246,31 @@ int is_systemd_rootfs(const char *path) {
     }
   }
 
-  /* Fallback: /sbin/init symlink target -- covers systemd and NixOS. */
+  /* Fallback: /sbin/init symlink target or script contents.
+   * Works for both:
+   *   (a) a symlink -> .../systemd (classic distros, NixOS-systemd)
+   *   (b) a plain shell-script wrapper that exec's systemd (e.g. some
+   *       NixOS tarballs where /sbin/init is a real file, not a symlink)
+   * NOTE: do NOT treat /nix/store alone as evidence of systemd -- Nix
+   * can package any init system (finit, openrc, runit, ...).  We only
+   * return 1 when we can see the literal string "systemd". */
   if (path_len + 12 <= sizeof(buf)) { /* 10 chars + '/' prefix + '\0' = 12 */
     memcpy(buf, path, path_len);
     memcpy(buf + path_len, "/sbin/init", 11);
     char link_target[PATH_MAX];
     ssize_t len = readlink(buf, link_target, sizeof(link_target) - 1);
     if (len != -1) {
+      /* Case (a): symlink - check the target path for "systemd" */
       link_target[len] = '\0';
       if (strstr(link_target, "systemd"))
         return 1;
-      /* NixOS: /sbin/init -> /nix/store/<hash>-nixos-system-.../init
-       * That wrapper execs systemd. The nix store path is unique enough. */
-      if (strstr(link_target, "/nix/store"))
-        return 1;
+    } else {
+      /* Case (b): regular file - grep script body for "systemd" */
+      char script_buf[4096];
+      if (read_file(buf, script_buf, sizeof(script_buf)) > 0) {
+        if (strstr(script_buf, "systemd"))
+          return 1;
+      }
     }
   }
 
@@ -1314,14 +1326,30 @@ ds_init_type_t detect_container_init(const char *path) {
        S_ISREG(st.st_mode)))
     return DS_INIT_S6;
 
-  /* sysvinit: /sbin/init is NOT a symlink, or symlink points to sysvinit */
+  /* sysvinit: /sbin/init is a regular binary, or symlink points to sysvinit.
+   * If /sbin/init is a real file (not a symlink), grep its content before
+   * declaring sysvinit -- Nix wrapper scripts must not be misclassified.
+   * NOTE: /nix/store presence does NOT imply systemd; finit, openrc, etc.
+   * can live there too.  Only match on the literal init-system name. */
   if (PROBE_PATH("/sbin/init")) {
     char target[PATH_MAX];
     ssize_t len = readlink(buf, target, sizeof(target) - 1);
     if (len == -1) {
-      /* not a symlink -> classic sysvinit binary */
-      if (stat(buf, &st) == 0 && S_ISREG(st.st_mode))
+      /* not a symlink -> stat and, if regular, inspect script body */
+      if (stat(buf, &st) == 0 && S_ISREG(st.st_mode)) {
+        char script_buf[4096];
+        if (read_file(buf, script_buf, sizeof(script_buf)) > 0) {
+          if (strstr(script_buf, "systemd"))
+            return DS_INIT_SYSTEMD;
+          if (strstr(script_buf, "busybox"))
+            return DS_INIT_BUSYBOX;
+          /* Any other Nix wrapper (finit, openrc, ...) falls through to
+           * DS_INIT_UNKNOWN so the caller can handle it gracefully. */
+          if (strstr(script_buf, "/nix/store"))
+            return DS_INIT_UNKNOWN;
+        }
         return DS_INIT_SYSVINIT;
+      }
     } else {
       target[len] = '\0';
       if (strstr(target, "busybox"))
@@ -1904,3 +1932,162 @@ void ds_format_size(long long bytes, char *buf, size_t sz) {
   }
   snprintf(buf, sz, "%.2f %s", d, units[u]);
 }
+
+static uint64_t ds_socketd_hton64(uint64_t value) {
+#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+  return value;
+#else
+  return ((uint64_t)htonl((uint32_t)(value & 0xffffffffULL)) << 32) |
+         (uint64_t)htonl((uint32_t)(value >> 32));
+#endif
+}
+
+static int ds_socketd_build_core_event_path(char *path, size_t path_size) {
+  if (!path || path_size == 0)
+    return -1;
+
+  int r = snprintf(path, path_size, "%.4076s/socketd-events.bin",
+                   get_logs_dir());
+  return (r > 0 && (size_t)r < path_size) ? 0 : -1;
+}
+
+static void ds_socketd_trim_core_event_file(const char *path) {
+  if (!path || path[0] == '\0')
+    return;
+
+  enum {
+    kSoftCapRecords = 128,
+    kRetainRecords = 64,
+  };
+
+  const size_t record_size = sizeof(struct ds_socketd_core_event_record);
+  const off_t soft_cap_bytes =
+      (off_t)(kSoftCapRecords * record_size);
+  const off_t retain_bytes =
+      (off_t)(kRetainRecords * record_size);
+
+  int fd = open(path, O_RDWR | O_CLOEXEC);
+  if (fd < 0)
+    return;
+
+  struct stat st;
+  if (fstat(fd, &st) < 0 || st.st_size <= soft_cap_bytes) {
+    close(fd);
+    return;
+  }
+
+  off_t complete_records = st.st_size / (off_t)record_size;
+  if (complete_records <= kRetainRecords) {
+    close(fd);
+    return;
+  }
+
+  off_t first_kept_record = complete_records - kRetainRecords;
+  off_t read_offset = first_kept_record * (off_t)record_size;
+
+  if (lseek(fd, read_offset, SEEK_SET) < 0) {
+    close(fd);
+    return;
+  }
+
+  struct ds_socketd_core_event_record keep[kRetainRecords];
+  memset(keep, 0, sizeof(keep));
+
+  size_t bytes_wanted = (size_t)retain_bytes;
+  size_t bytes_read = 0;
+
+  while (bytes_read < bytes_wanted) {
+    ssize_t n = read(fd, (uint8_t *)keep + bytes_read,
+                     bytes_wanted - bytes_read);
+    if (n < 0) {
+      if (errno == EINTR)
+        continue;
+      close(fd);
+      return;
+    }
+
+    if (n == 0)
+      break;
+
+    bytes_read += (size_t)n;
+  }
+
+  bytes_read -= bytes_read % record_size;
+  if (bytes_read == 0) {
+    close(fd);
+    return;
+  }
+
+  if (ftruncate(fd, 0) < 0 || lseek(fd, 0, SEEK_SET) < 0) {
+    close(fd);
+    return;
+  }
+
+  if (write_all(fd, keep, bytes_read) != (ssize_t)bytes_read) {
+    close(fd);
+    return;
+  }
+
+  close(fd);
+}
+
+void ds_socketd_record_core_event(const char *action,
+                                  const char *container_name,
+                                  const char *uuid) {
+  struct timespec ts;
+  if (clock_gettime(CLOCK_REALTIME, &ts) < 0)
+    return;
+
+  mkdir_p(get_logs_dir(), 0755);
+
+  char event_path[PATH_MAX];
+  if (ds_socketd_build_core_event_path(event_path, sizeof(event_path)) < 0)
+    return;
+
+  struct ds_socketd_core_event_record record;
+  memset(&record, 0, sizeof(record));
+
+  uint64_t time_seconds = (uint64_t)ts.tv_sec;
+  uint64_t time_nano =
+      (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
+
+  record.time_be = (int64_t)ds_socketd_hton64(time_seconds);
+  record.time_nano_be = (int64_t)ds_socketd_hton64(time_nano);
+
+  safe_strncpy(record.type, "container", sizeof(record.type));
+  safe_strncpy(record.action, action, sizeof(record.action));
+  safe_strncpy(record.actor_id, uuid, sizeof(record.actor_id));
+  safe_strncpy(record.actor_name, container_name, sizeof(record.actor_name));
+
+  int fd = open(event_path,
+                O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC,
+                0644);
+  if (fd < 0)
+    return;
+
+  if (write_all(fd, &record, sizeof(record)) != (ssize_t)sizeof(record)) {
+    close(fd);
+    return;
+  }
+
+  struct stat st;
+  int should_trim = 0;
+  if (fstat(fd, &st) == 0) {
+    off_t soft_cap =
+        (off_t)(128 * sizeof(struct ds_socketd_core_event_record));
+    should_trim = st.st_size > soft_cap;
+  }
+
+  close(fd);
+  
+  /*
+   * CONCERN(socketd-events):
+   * Event compaction is best-effort and intentionally unsynchronized. The
+   * file is small and local; a future hardening pass can add advisory locking
+   * if multiple event writers become materially concurrent in practice.
+   */
+
+  if (should_trim)
+    ds_socketd_trim_core_event_file(event_path);
+}
+

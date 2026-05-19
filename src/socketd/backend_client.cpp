@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <utility>
 
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -108,6 +109,53 @@ int connect_backend(std::string& error) {
   }
 
   return fd;
+}
+
+std::uint64_t ntoh64(std::uint64_t value) {
+#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+  return value;
+#else
+  return (static_cast<std::uint64_t>(
+              ntohl(static_cast<std::uint32_t>(value & 0xffffffffULL)))
+          << 32) |
+         static_cast<std::uint64_t>(
+             ntohl(static_cast<std::uint32_t>(value >> 32)));
+#endif
+}
+
+std::uint64_t hton64(std::uint64_t value) {
+  return ntoh64(value);
+}
+
+std::string decode_fixed_string(const char* data, std::size_t size) {
+  if (!data || size == 0) {
+    return {};
+  }
+
+  const void* nul = std::memchr(data, '\0', size);
+  const std::size_t len =
+      nul ? static_cast<const char*>(nul) - data : size;
+
+  /*
+   * CONCERN(socketd-wire):
+   * Backend wire strings are fixed-width char arrays rather than
+   * length-prefixed blobs. Decode defensively and tolerate a field that fills
+   * its entire slot without an in-bounds NUL terminator.
+   */
+  return std::string(data, len);
+}
+
+bool expect_ok_status(std::uint16_t status,
+                      const char* operation,
+                      std::string& error) {
+  if (status == DS_SOCKETD_STATUS_OK) {
+    return true;
+  }
+
+  error = operation;
+  error += " returned backend status ";
+  error += std::to_string(status);
+  return false;
 }
 
 }  // namespace
@@ -242,6 +290,242 @@ bool BackendClient::capabilities(CapabilitiesResult& out,
   std::uint32_t mask_be = 0;
   std::memcpy(&mask_be, payload.data(), sizeof(mask_be));
   out.mask = ntohl(mask_be);
+
+  return true;
+}
+
+bool BackendClient::list_containers(
+    bool include_all,
+    std::vector<ContainerRecordResult>& out,
+    std::string& error) const {
+  ds_socketd_list_containers_req req {};
+  req.include_all = include_all ? 1u : 0u;
+
+  std::uint16_t status = DS_SOCKETD_STATUS_INTERNAL_ERROR;
+  std::string payload;
+
+  if (!request(DS_SOCKETD_OP_LIST_CONTAINERS,
+               &req,
+               static_cast<std::uint32_t>(sizeof(req)),
+               status,
+               payload,
+               error)) {
+    return false;
+  }
+
+  if (!expect_ok_status(status, "LIST_CONTAINERS", error)) {
+    return false;
+  }
+
+  if (payload.size() % sizeof(ds_socketd_container_record) != 0) {
+    error = "LIST_CONTAINERS returned payload of invalid size";
+    return false;
+  }
+
+  out.clear();
+
+  const std::size_t count =
+      payload.size() / sizeof(ds_socketd_container_record);
+  out.reserve(count);
+
+  for (std::size_t i = 0; i < count; ++i) {
+    ds_socketd_container_record wire {};
+    std::memcpy(&wire,
+                payload.data() + i * sizeof(wire),
+                sizeof(wire));
+
+    ContainerRecordResult result;
+    result.name =
+        decode_fixed_string(wire.name, sizeof(wire.name));
+    result.uuid =
+        decode_fixed_string(wire.uuid, sizeof(wire.uuid));
+    result.rootfs_path =
+        decode_fixed_string(wire.rootfs_path, sizeof(wire.rootfs_path));
+    result.hostname =
+        decode_fixed_string(wire.hostname, sizeof(wire.hostname));
+    result.nat_ip =
+        decode_fixed_string(wire.nat_ip, sizeof(wire.nat_ip));
+    result.custom_init =
+        decode_fixed_string(wire.custom_init, sizeof(wire.custom_init));
+
+    result.pid = static_cast<std::int32_t>(
+        ntohl(static_cast<std::uint32_t>(wire.pid_be)));
+
+    result.net_mode = wire.net_mode;
+
+    result.started_at = static_cast<std::int64_t>(
+        ntoh64(static_cast<std::uint64_t>(wire.started_at_be)));
+
+    std::size_t port_count = wire.port_count;
+    if (port_count > DS_SOCKETD_RECORD_PORTS_MAX) {
+      port_count = DS_SOCKETD_RECORD_PORTS_MAX;
+    }
+
+    result.ports.reserve(port_count);
+
+    for (std::size_t j = 0; j < port_count; ++j) {
+      const ds_socketd_port_record& port_wire = wire.ports[j];
+
+      ContainerPortResult port;
+      port.host_port = ntohs(port_wire.host_port_be);
+      port.host_port_end = ntohs(port_wire.host_port_end_be);
+      port.container_port = ntohs(port_wire.container_port_be);
+      port.container_port_end =
+          ntohs(port_wire.container_port_end_be);
+      port.proto = port_wire.proto;
+
+      result.ports.push_back(std::move(port));
+    }
+
+    out.push_back(std::move(result));
+  }
+
+  return true;
+}
+
+bool BackendClient::info(InfoResult& out, std::string& error) const {
+  std::uint16_t status = DS_SOCKETD_STATUS_INTERNAL_ERROR;
+  std::string payload;
+
+  if (!request(DS_SOCKETD_OP_INFO, nullptr, 0,
+               status, payload, error)) {
+    return false;
+  }
+
+  if (!expect_ok_status(status, "INFO", error)) {
+    return false;
+  }
+
+  if (payload.size() != sizeof(ds_socketd_info_payload)) {
+    error = "INFO returned payload of unexpected size";
+    return false;
+  }
+
+  ds_socketd_info_payload wire {};
+  std::memcpy(&wire, payload.data(), sizeof(wire));
+
+  out.containers_total = ntohl(wire.containers_total_be);
+  out.containers_running = ntohl(wire.containers_running_be);
+  out.containers_stopped = ntohl(wire.containers_stopped_be);
+
+  return true;
+}
+
+bool BackendClient::list_images(
+    std::vector<ImageRecordResult>& out,
+    std::string& error) const {
+  std::uint16_t status = DS_SOCKETD_STATUS_INTERNAL_ERROR;
+  std::string payload;
+
+  if (!request(DS_SOCKETD_OP_LIST_IMAGES, nullptr, 0,
+               status, payload, error)) {
+    return false;
+  }
+
+  if (!expect_ok_status(status, "LIST_IMAGES", error)) {
+    return false;
+  }
+
+  if (payload.size() % sizeof(ds_socketd_image_record) != 0) {
+    error = "LIST_IMAGES returned payload of invalid size";
+    return false;
+  }
+
+  out.clear();
+
+  const std::size_t count =
+      payload.size() / sizeof(ds_socketd_image_record);
+  out.reserve(count);
+
+  for (std::size_t i = 0; i < count; ++i) {
+    ds_socketd_image_record wire {};
+    std::memcpy(&wire,
+                payload.data() + i * sizeof(wire),
+                sizeof(wire));
+
+    ImageRecordResult result;
+    result.name =
+        decode_fixed_string(wire.name, sizeof(wire.name));
+    result.rootfs_path =
+        decode_fixed_string(wire.rootfs_path, sizeof(wire.rootfs_path));
+    result.uuid =
+        decode_fixed_string(wire.uuid, sizeof(wire.uuid));
+
+    result.is_running =
+        ntohl(static_cast<std::uint32_t>(wire.is_running_be)) != 0;
+
+    result.created_at = static_cast<std::int64_t>(
+        ntoh64(static_cast<std::uint64_t>(wire.created_at_be)));
+
+    out.push_back(std::move(result));
+  }
+
+  return true;
+}
+
+bool BackendClient::poll_events(
+    std::int64_t since,
+    std::vector<CoreEventResult>& out,
+    std::string& error) const {
+  if (since < 0) {
+    error = "POLL_EVENTS does not accept a negative 'since' value";
+    return false;
+  }
+
+  ds_socketd_poll_events_req req {};
+  req.since_be = static_cast<std::int64_t>(
+      hton64(static_cast<std::uint64_t>(since)));
+
+  std::uint16_t status = DS_SOCKETD_STATUS_INTERNAL_ERROR;
+  std::string payload;
+
+  if (!request(DS_SOCKETD_OP_POLL_EVENTS,
+               &req,
+               static_cast<std::uint32_t>(sizeof(req)),
+               status,
+               payload,
+               error)) {
+    return false;
+  }
+
+  if (!expect_ok_status(status, "POLL_EVENTS", error)) {
+    return false;
+  }
+
+  if (payload.size() % sizeof(ds_socketd_core_event_record) != 0) {
+    error = "POLL_EVENTS returned payload of invalid size";
+    return false;
+  }
+
+  out.clear();
+
+  const std::size_t count =
+      payload.size() / sizeof(ds_socketd_core_event_record);
+  out.reserve(count);
+
+  for (std::size_t i = 0; i < count; ++i) {
+    ds_socketd_core_event_record wire {};
+    std::memcpy(&wire,
+                payload.data() + i * sizeof(wire),
+                sizeof(wire));
+
+    CoreEventResult result;
+    result.time = static_cast<std::int64_t>(
+        ntoh64(static_cast<std::uint64_t>(wire.time_be)));
+    result.time_nano = static_cast<std::int64_t>(
+        ntoh64(static_cast<std::uint64_t>(wire.time_nano_be)));
+
+    result.type =
+        decode_fixed_string(wire.type, sizeof(wire.type));
+    result.action =
+        decode_fixed_string(wire.action, sizeof(wire.action));
+    result.actor_id =
+        decode_fixed_string(wire.actor_id, sizeof(wire.actor_id));
+    result.actor_name =
+        decode_fixed_string(wire.actor_name, sizeof(wire.actor_name));
+
+    out.push_back(std::move(result));
+  }
 
   return true;
 }
