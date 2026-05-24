@@ -89,7 +89,7 @@ object AndroidSystemStatsCollector {
         )
         for (path in paths) {
             try {
-                val result = Shell.cmd("cat $path 2>/dev/null").exec()
+                val result = Shell.cmd("cat '$path' 2>/dev/null").exec()
                 if (result.isSuccess && result.out.isNotEmpty()) {
                     val mC = result.out[0].trim().toLongOrNull()
                     if (mC != null && mC > 0) return@withContext String.format("%.1f°C", mC / 1000.0)

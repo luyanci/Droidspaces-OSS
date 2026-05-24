@@ -56,7 +56,7 @@ object ContainerInstaller {
 
             // Step 2: Create container directory
             logger.i("Creating container directory: $containerPath")
-            val mkdirResult = Shell.cmd("mkdir -p \"$containerPath\" 2>&1").exec()
+            val mkdirResult = Shell.cmd("mkdir -p '$containerPath'").exec()
             if (!mkdirResult.isSuccess) {
                 val errorOutput = (mkdirResult.out + mkdirResult.err).joinToString("\n").trim()
                 val errorMsg = if (errorOutput.isNotEmpty()) errorOutput else "Unknown error (exit code: ${mkdirResult.code})"
@@ -88,7 +88,7 @@ object ContainerInstaller {
                 )
             } else {
                 // Create rootfs subdirectory
-                val mkdirRootfsResult = Shell.cmd("mkdir -p \"$rootfsPath\" 2>&1").exec()
+                val mkdirRootfsResult = Shell.cmd("mkdir -p '$rootfsPath'").exec()
                 if (!mkdirRootfsResult.isSuccess) {
                     val errorOutput = (mkdirRootfsResult.out + mkdirRootfsResult.err).joinToString("\n").trim()
                     val errorMsg = if (errorOutput.isNotEmpty()) errorOutput else "Unknown error (exit code: ${mkdirRootfsResult.code})"
@@ -98,16 +98,16 @@ object ContainerInstaller {
                 logger.i("Extracting tarball to $rootfsPath...")
                 val isXz = tempTarball.name.lowercase().endsWith(".xz")
                 val extractCmd = if (isXz) {
-                    "cd \"$rootfsPath\" && $BUSYBOX_PATH xzcat \"${tempTarball.absolutePath}\" | $BUSYBOX_PATH tar -xpf - 2>&1"
+                    "cd '$rootfsPath' && $BUSYBOX_PATH xzcat '${tempTarball.absolutePath}' | $BUSYBOX_PATH tar -xpf -"
                 } else {
-                    "cd \"$rootfsPath\" && $BUSYBOX_PATH tar -xzpf \"${tempTarball.absolutePath}\" 2>&1"
+                    "cd '$rootfsPath' && $BUSYBOX_PATH tar -xzpf '${tempTarball.absolutePath}'"
                 }
 
                 val extractResult = Shell.cmd(extractCmd).exec()
                 if (!extractResult.isSuccess) {
-                    val errorMsg = extractResult.err.joinToString("\n")
-                    logger.e("Extraction failed: $errorMsg")
-                    throw Exception("Failed to extract tarball: $errorMsg")
+                    val errorMsg = extractResult.err.joinToString("\n") + extractResult.out.joinToString("\n")
+                    logger.e("Extraction failed: ${errorMsg.ifEmpty { "unknown error" }}")
+                    throw Exception("Failed to extract tarball: ${errorMsg.ifEmpty { "unknown error" }}")
                 }
 
                 logger.i("Tarball extracted successfully")
@@ -127,7 +127,7 @@ object ContainerInstaller {
 
             // Copy temp config to final location using shell (root required)
             // Quote paths to handle any special characters
-            val copyResult = Shell.cmd("cp \"${tempConfigFile.absolutePath}\" \"$configFilePath\" 2>&1").exec()
+            val copyResult = Shell.cmd("cp '${tempConfigFile.absolutePath}' '$configFilePath'").exec()
             if (!copyResult.isSuccess) {
                 // Check both stdout and stderr for error messages
                 val errorOutput = (copyResult.out + copyResult.err).joinToString("\n").trim()
@@ -139,7 +139,7 @@ object ContainerInstaller {
             }
 
             // Set proper permissions
-            val chmodResult = Shell.cmd("chmod 644 \"$configFilePath\" 2>&1").exec()
+            val chmodResult = Shell.cmd("chmod 644 '$configFilePath'").exec()
             if (!chmodResult.isSuccess) {
                 logger.w("Warning: Failed to set config file permissions")
             }
@@ -159,12 +159,12 @@ object ContainerInstaller {
                 try {
                     tempEnvFile.writeText(config.envFileContent + "\n")
 
-                    val envCopyResult = Shell.cmd("cp \"${tempEnvFile.absolutePath}\" \"$envFilePath\" 2>&1").exec()
+                    val envCopyResult = Shell.cmd("cp '${tempEnvFile.absolutePath}' '$envFilePath'").exec()
                     if (!envCopyResult.isSuccess) {
-                        val errorMsg = envCopyResult.err.joinToString("\n")
-                        logger.w("Warning: Failed to copy .env file: $errorMsg")
+                        val errorMsg = envCopyResult.err.joinToString("\n") + envCopyResult.out.joinToString("\n")
+                        logger.w("Warning: Failed to copy .env file: ${errorMsg.ifEmpty { "unknown error" }}")
                     } else {
-                        Shell.cmd("chmod 644 \"$envFilePath\"").exec()
+                        Shell.cmd("chmod 644 '$envFilePath'").exec()
                         logger.i("Environment variables saved")
                         createdPaths.add(envFilePath)
                     }
@@ -178,12 +178,12 @@ object ContainerInstaller {
             // Step 6: Verify installation
             logger.i("Verifying installation...")
             if (config.useSparseImage) {
-                val imgExists = Shell.cmd("test -f \"$rootfsPath\" && echo 'exists' || echo 'not_found'").exec()
+                val imgExists = Shell.cmd("test -f '$rootfsPath' && echo 'exists' || echo 'not_found'").exec()
                 if (!imgExists.isSuccess || !imgExists.out.any { it.contains("exists") }) {
                     throw Exception("Container sparse image not found after extraction")
                 }
             } else {
-            val rootfsExists = Shell.cmd("test -d \"$rootfsPath\" && echo 'exists' || echo 'not_found'").exec()
+            val rootfsExists = Shell.cmd("test -d '$rootfsPath' && echo 'exists' || echo 'not_found'").exec()
             if (!rootfsExists.isSuccess || !rootfsExists.out.any { it.contains("exists") }) {
                 throw Exception("Container rootfs directory not found after extraction")
                 }

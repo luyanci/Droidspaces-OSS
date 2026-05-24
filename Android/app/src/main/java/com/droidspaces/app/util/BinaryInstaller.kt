@@ -78,10 +78,11 @@ object BinaryInstaller {
 
             // Step 2: Create directories
             onProgress(InstallationStep.CreatingDirectories(INSTALL_PATH))
-            val mkdirResult = Shell.cmd("mkdir -p $INSTALL_PATH").exec()
+            val mkdirResult = Shell.cmd("mkdir -p '$INSTALL_PATH'").exec()
             if (!mkdirResult.isSuccess) {
+                val errorMsg = mkdirResult.err.joinToString() + mkdirResult.out.joinToString()
                 return@withContext Result.failure(
-                    Exception("Failed to create directory: ${mkdirResult.err.joinToString()}")
+                    Exception("Failed to create directory: ${errorMsg.ifEmpty { "unknown error" }}")
                 )
             }
 
@@ -183,11 +184,11 @@ object BinaryInstaller {
      * so it acknowledges the update (used for logging).
      */
     suspend fun signalDaemon(): Unit = withContext(Dispatchers.IO) {
-        val pidResult = Shell.cmd("cat ${Constants.DAEMON_PID_FILE} 2>/dev/null").exec()
+        val pidResult = Shell.cmd("cat '${Constants.DAEMON_PID_FILE}' 2>/dev/null").exec()
         if (pidResult.isSuccess && pidResult.out.isNotEmpty()) {
             val pid = pidResult.out[0].trim()
             if (pid.isNotEmpty()) {
-                Shell.cmd("kill -USR2 $pid 2>/dev/null").exec()
+                Shell.cmd("kill -USR2 '$pid' 2>/dev/null").exec()
             }
         }
     }

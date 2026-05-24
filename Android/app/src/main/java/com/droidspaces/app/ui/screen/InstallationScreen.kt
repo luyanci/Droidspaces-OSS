@@ -70,7 +70,7 @@ fun InstallationScreen(
             // Check if SELinux policy exists anywhere BEFORE we start nuking things
             // We check both the module path and the backend backup path
             val sepolicyExists = withContext(Dispatchers.IO) {
-                Shell.cmd("test -f ${Constants.DROIDSPACES_TE_PATH}").exec().isSuccess
+                Shell.cmd("test -f '${Constants.DROIDSPACES_TE_PATH}'").exec().isSuccess
             }
             if (!sepolicyExists) {
                 rebootRecommended = true
