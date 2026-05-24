@@ -80,9 +80,16 @@ object BinaryInstaller {
             onProgress(InstallationStep.CreatingDirectories(INSTALL_PATH))
             val mkdirResult = Shell.cmd("mkdir -p '$INSTALL_PATH'").exec()
             if (!mkdirResult.isSuccess) {
-                val errorMsg = mkdirResult.err.joinToString() + mkdirResult.out.joinToString()
+                val stderrMsg = mkdirResult.err.joinToString("\n")
+                val stdoutMsg = mkdirResult.out.joinToString("\n")
+                val exitCode = mkdirResult.code
+                val errorMsg = if (stderrMsg.isNotEmpty() || stdoutMsg.isNotEmpty()) {
+                    "${stderrMsg.ifEmpty { stdoutMsg }}"
+                } else {
+                    "Exit code: $exitCode, Path: $INSTALL_PATH"
+                }
                 return@withContext Result.failure(
-                    Exception("Failed to create directory: ${errorMsg.ifEmpty { "unknown error" }}")
+                    Exception("Failed to create directory: $errorMsg")
                 )
             }
 
@@ -110,9 +117,16 @@ object BinaryInstaller {
                 val copyResult = Shell.cmd("cp '${tempFile.absolutePath}' '$tempTargetPath'").exec()
                 if (!copyResult.isSuccess) {
                     tempFile.delete()
-                    val errorMsg = copyResult.err.joinToString() + copyResult.out.joinToString()
+                    val stderrMsg = copyResult.err.joinToString("\n")
+                    val stdoutMsg = copyResult.out.joinToString("\n")
+                    val exitCode = copyResult.code
+                    val errorMsg = if (stderrMsg.isNotEmpty() || stdoutMsg.isNotEmpty()) {
+                        "${stderrMsg.ifEmpty { stdoutMsg }}"
+                    } else {
+                        "Exit code: $exitCode, Source: ${tempFile.absolutePath}, Dest: $tempTargetPath"
+                    }
                     return Result.failure(
-                        Exception("Failed to copy $displayName to temp location: ${errorMsg.ifEmpty { "unknown error" }}")
+                        Exception("Failed to copy $displayName to temp location: $errorMsg")
                     )
                 }
                 tempFile.delete() // Clean up app cache temp file
@@ -121,9 +135,16 @@ object BinaryInstaller {
                 val chmodResult = Shell.cmd("chmod 755 '$tempTargetPath'").exec()
                 if (!chmodResult.isSuccess) {
                     Shell.cmd("rm -f '$tempTargetPath'").exec() // Clean up temp file
-                    val errorMsg = chmodResult.err.joinToString() + chmodResult.out.joinToString()
+                    val stderrMsg = chmodResult.err.joinToString("\n")
+                    val stdoutMsg = chmodResult.out.joinToString("\n")
+                    val exitCode = chmodResult.code
+                    val errorMsg = if (stderrMsg.isNotEmpty() || stdoutMsg.isNotEmpty()) {
+                        "${stderrMsg.ifEmpty { stdoutMsg }}"
+                    } else {
+                        "Exit code: $exitCode, Path: $tempTargetPath"
+                    }
                     return Result.failure(
-                        Exception("Failed to set permissions for $displayName: ${errorMsg.ifEmpty { "unknown error" }}")
+                        Exception("Failed to set permissions for $displayName: $errorMsg")
                     )
                 }
 
@@ -134,9 +155,16 @@ object BinaryInstaller {
                 val moveResult = Shell.cmd("mv -f '$tempTargetPath' '$targetPath'").exec()
                 if (!moveResult.isSuccess) {
                     Shell.cmd("rm -f '$tempTargetPath'").exec() // Clean up temp file on failure
-                    val errorMsg = moveResult.err.joinToString() + moveResult.out.joinToString()
+                    val stderrMsg = moveResult.err.joinToString("\n")
+                    val stdoutMsg = moveResult.out.joinToString("\n")
+                    val exitCode = moveResult.code
+                    val errorMsg = if (stderrMsg.isNotEmpty() || stdoutMsg.isNotEmpty()) {
+                        "${stderrMsg.ifEmpty { stdoutMsg }}"
+                    } else {
+                        "Exit code: $exitCode, Source: $tempTargetPath, Dest: $targetPath"
+                    }
                     return Result.failure(
-                        Exception("Failed to install $displayName: ${errorMsg.ifEmpty { "unknown error" }}")
+                        Exception("Failed to install $displayName: $errorMsg")
                     )
                 }
 

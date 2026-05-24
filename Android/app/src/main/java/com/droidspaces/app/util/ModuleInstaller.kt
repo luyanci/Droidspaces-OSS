@@ -87,18 +87,32 @@ object ModuleInstaller {
             val mkdirResult = Shell.cmd("mkdir -p '$MAGISK_MODULE_PATH'").exec()
             if (!mkdirResult.isSuccess) {
                 tempDir.deleteRecursively()
-                val errorMsg = mkdirResult.err.joinToString() + mkdirResult.out.joinToString()
+                val stderrMsg = mkdirResult.err.joinToString("\n")
+                val stdoutMsg = mkdirResult.out.joinToString("\n")
+                val exitCode = mkdirResult.code
+                val errorMsg = if (stderrMsg.isNotEmpty() || stdoutMsg.isNotEmpty()) {
+                    "${stderrMsg.ifEmpty { stdoutMsg }}"
+                } else {
+                    "Exit code: $exitCode, Path: $MAGISK_MODULE_PATH"
+                }
                 return@withContext Result.failure(
-                    Exception("Failed to create module directory: ${errorMsg.ifEmpty { "unknown error" }}")
+                    Exception("Failed to create module directory: $errorMsg")
                 )
             }
 
             val copyResult = Shell.cmd("cp -arf '${tempDir.absolutePath}'/* '$MAGISK_MODULE_PATH/'").exec()
             tempDir.deleteRecursively()
             if (!copyResult.isSuccess) {
-                val errorMsg = copyResult.err.joinToString() + copyResult.out.joinToString()
+                val stderrMsg = copyResult.err.joinToString("\n")
+                val stdoutMsg = copyResult.out.joinToString("\n")
+                val exitCode = copyResult.code
+                val errorMsg = if (stderrMsg.isNotEmpty() || stdoutMsg.isNotEmpty()) {
+                    "${stderrMsg.ifEmpty { stdoutMsg }}"
+                } else {
+                    "Exit code: $exitCode, Source: ${tempDir.absolutePath}, Dest: $MAGISK_MODULE_PATH"
+                }
                 return@withContext Result.failure(
-                    Exception("Failed to copy module files: ${errorMsg.ifEmpty { "unknown error" }}")
+                    Exception("Failed to copy module files: $errorMsg")
                 )
             }
 
@@ -106,9 +120,16 @@ object ModuleInstaller {
             onProgress(ModuleInstallationStep.SettingPermissions(MAGISK_MODULE_PATH))
             val chmodScriptsResult = Shell.cmd("chmod 755 '$MAGISK_MODULE_PATH'/*.sh && chmod 644 '$MAGISK_MODULE_PATH'/*.prop && mkdir -p '$MAGISK_MODULE_PATH/etc' && chmod 644 '$MAGISK_MODULE_PATH'/etc/*.te").exec()
             if (!chmodScriptsResult.isSuccess) {
-                val errorMsg = chmodScriptsResult.err.joinToString() + chmodScriptsResult.out.joinToString()
+                val stderrMsg = chmodScriptsResult.err.joinToString("\n")
+                val stdoutMsg = chmodScriptsResult.out.joinToString("\n")
+                val exitCode = chmodScriptsResult.code
+                val errorMsg = if (stderrMsg.isNotEmpty() || stdoutMsg.isNotEmpty()) {
+                    "${stderrMsg.ifEmpty { stdoutMsg }}"
+                } else {
+                    "Exit code: $exitCode, Path: $MAGISK_MODULE_PATH"
+                }
                 return@withContext Result.failure(
-                    Exception("Failed to set permissions: ${errorMsg.ifEmpty { "unknown error" }}")
+                    Exception("Failed to set permissions: $errorMsg")
                 )
             }
 
