@@ -7,9 +7,6 @@ DROIDSPACE_DIR=/data/local/Droidspaces
 LOGS_DIR=${DROIDSPACE_DIR}/Logs
 LOGS_FILE=${LOGS_DIR}/boot-module.log
 DROIDSPACE_BINARY=${DROIDSPACE_DIR}/bin/droidspaces
-BUSYBOX_BINARY=${DROIDSPACE_DIR}/bin/busybox
-MAGISKPOLICY_BINARY=${DROIDSPACE_DIR}/bin/magiskpolicy
-DROIDSPACES_TE_FILE=${MODDIR}/etc/droidspaces.te
 
 # Create logs directory if it doesn't exist
 mkdir -p "${LOGS_DIR}" 2>/dev/null
@@ -54,24 +51,8 @@ if [ -f /vendor/bin/droidspaces ] || [ -L /vendor/bin/droidspaces ]; then
     exit 0
 fi
 
-# Live SELinux patching
-if [ -f "${MAGISKPOLICY_BINARY}" ] && [ -f "${DROIDSPACES_TE_FILE}" ]; then
-    log "Patching SELinux policy..."
-    OUTPUT=$("${MAGISKPOLICY_BINARY}" --live --apply "${DROIDSPACES_TE_FILE}" 2>&1)
-    RET=$?
-    if [ $RET -eq 0 ]; then
-        log "SELinux policy patched successfully"
-
-    else
-        log "WARNING: magiskpolicy failed (exit $RET)"
-        log "Output: ${OUTPUT}"
-    fi
-else
-    log "Skipping live SELinux patch: magiskpolicy or .te file missing"
-fi
-
 # Start the Droidspaces daemon if enabled (value 1)
-if [ -f "${DAEMON_MODE_FILE}" ] && [ "$(${BUSYBOX_BINARY} cat "${DAEMON_MODE_FILE}" 2>/dev/null)" = "1" ]; then
+if [ -f "${DAEMON_MODE_FILE}" ] && [ "$(cat "${DAEMON_MODE_FILE}" 2>/dev/null)" = "1" ]; then
     log "Daemon mode enabled, starting Droidspaces daemon..."
 
     # Relabel the binary to droidspacesd_exec so the kernel's SELinux entrypoint

@@ -8,7 +8,6 @@ LOGS_DIR=${DROIDSPACE_DIR}/Logs
 LOGS_FILE=${LOGS_DIR}/boot-module.log
 CONTAINERS_DIR=${DROIDSPACE_DIR}/Containers
 DROIDSPACE_BINARY=${DROIDSPACE_DIR}/bin/droidspaces
-BUSYBOX_BINARY=${DROIDSPACE_DIR}/bin/busybox
 DAEMON_MODE_FILE=${DROIDSPACE_DIR}/.daemon_mode
 DMESG_PID_FILE=${DROIDSPACE_DIR}/.dmesg_pid
 
@@ -84,7 +83,7 @@ done
 
 # Apply correct SELinux context to rootfs images
 log "Applying SELinux context to rootfs images..."
-${BUSYBOX_BINARY} find "${CONTAINERS_DIR}" -name "*.img" \
+find "${CONTAINERS_DIR}" -name "*.img" \
     -exec chcon u:object_r:vold_data_file:s0 {} + 2>/dev/null
 
 # Wait for full boot
@@ -121,7 +120,7 @@ wait_for_network() {
 # Check daemon status
 DAEMON_STATUS="⚪ Off"
 if [ -f "${DAEMON_MODE_FILE}" ] && \
-   [ "$(${BUSYBOX_BINARY} cat "${DAEMON_MODE_FILE}" 2>/dev/null)" = "1" ]; then
+   [ "$(cat "${DAEMON_MODE_FILE}" 2>/dev/null)" = "1" ]; then
 
     log "Daemon mode enabled, checking status..."
 
@@ -150,23 +149,23 @@ log "Scanning for containers with run_at_boot=1..."
 success=0
 failed=0
 
-for cfg in $(${BUSYBOX_BINARY} find "${CONTAINERS_DIR}" -name "container.config" 2>/dev/null); do
+for cfg in $(find "${CONTAINERS_DIR}" -name "container.config" 2>/dev/null); do
     [ -f "${cfg}" ] || continue
 
-    run_at_boot=$(${BUSYBOX_BINARY} grep "^run_at_boot=" "${cfg}" 2>/dev/null | \
-        ${BUSYBOX_BINARY} head -1 | ${BUSYBOX_BINARY} sed 's/^[^=]*=//' | \
-        ${BUSYBOX_BINARY} tr -d '\r\n')
+    run_at_boot=$(grep "^run_at_boot=" "${cfg}" 2>/dev/null | \
+        head -1 | sed 's/^[^=]*=//' | \
+        tr -d '\r\n')
 
     [ "${run_at_boot}" = "1" ] || continue
 
-    name=$(${BUSYBOX_BINARY} grep "^name=" "${cfg}" 2>/dev/null | \
-        ${BUSYBOX_BINARY} head -1 | ${BUSYBOX_BINARY} sed 's/^[^=]*=//' | \
-        ${BUSYBOX_BINARY} tr -d '\r\n')
+    name=$(grep "^name=" "${cfg}" 2>/dev/null | \
+        head -1 | sed 's/^[^=]*=//' | \
+        tr -d '\r\n')
     display="${name:-$(basename "$(dirname "${cfg}")")}"
 
     log "Starting container: ${display}"
     "${DROIDSPACE_BINARY}" --config "${cfg}" start 2>&1 | \
-        ${BUSYBOX_BINARY} sed "s/$(printf '\033')\[[0-9;]*[mK]//g"
+        sed "s/$(printf '\033')\[[0-9;]*[mK]//g"
 
     PID=$("${DROIDSPACE_BINARY}" --config "${cfg}" pid 2>/dev/null)
     if [ "${PID}" != "NONE" ] && [ -n "${PID}" ]; then

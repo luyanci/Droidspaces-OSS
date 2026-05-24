@@ -14,7 +14,7 @@ object Constants {
     const val BUSYBOX_BINARY_PATH = "$INSTALL_PATH/$BUSYBOX_BINARY_NAME"
     const val MAGISKPOLICY_BINARY_PATH = "$INSTALL_PATH/$MAGISKPOLICY_BINARY_NAME"
     const val MAGISK_MODULE_PATH = "/data/adb/modules/droidspaces"
-    const val DROIDSPACES_TE_PATH = MAGISK_MODULE_PATH + "/etc/droidspaces.te"
+    const val DROIDSPACES_TE_PATH = MAGISK_MODULE_PATH + "/sepolicy.rule"
 
     // Container paths
     const val CONTAINERS_BASE_PATH = "/data/local/Droidspaces/Containers"
