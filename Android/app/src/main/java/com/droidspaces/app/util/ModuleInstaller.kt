@@ -102,10 +102,11 @@ object ModuleInstaller {
 
             // Step 4: Set permissions
             onProgress(ModuleInstallationStep.SettingPermissions(MAGISK_MODULE_PATH))
-            val chmodScriptsResult = Shell.cmd("chmod 755 '$MAGISK_MODULE_PATH'/*.sh 2>&1 && chmod 644 '$MAGISK_MODULE_PATH'/*.prop 2>&1 && mkdir -p '$MAGISK_MODULE_PATH/etc' && chmod 644 '$MAGISK_MODULE_PATH'/etc/*.te 2>&1").exec()
+            val chmodScriptsResult = Shell.cmd("chmod 755 '$MAGISK_MODULE_PATH'/*.sh && chmod 644 '$MAGISK_MODULE_PATH'/*.prop && mkdir -p '$MAGISK_MODULE_PATH/etc' && chmod 644 '$MAGISK_MODULE_PATH'/etc/*.te").exec()
             if (!chmodScriptsResult.isSuccess) {
+                val errorMsg = chmodScriptsResult.err.joinToString() + chmodScriptsResult.out.joinToString()
                 return@withContext Result.failure(
-                    Exception("Failed to set permissions: ${chmodScriptsResult.err.joinToString()}")
+                    Exception("Failed to set permissions: ${errorMsg.ifEmpty { "unknown error" }}")
                 )
             }
 

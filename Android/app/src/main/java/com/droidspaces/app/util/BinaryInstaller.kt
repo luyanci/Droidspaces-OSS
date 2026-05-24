@@ -116,11 +116,12 @@ object BinaryInstaller {
                 tempFile.delete() // Clean up app cache temp file
 
                 // Step 2: Set permissions on temp file (must be done before move)
-                val chmodResult = Shell.cmd("chmod 755 $tempTargetPath 2>&1").exec()
+                val chmodResult = Shell.cmd("chmod 755 $tempTargetPath").exec()
                 if (!chmodResult.isSuccess) {
-                    Shell.cmd("rm -f $tempTargetPath 2>&1").exec() // Clean up temp file
+                    Shell.cmd("rm -f $tempTargetPath").exec() // Clean up temp file
+                    val errorMsg = chmodResult.err.joinToString() + chmodResult.out.joinToString()
                     return Result.failure(
-                        Exception("Failed to set permissions for $displayName: ${chmodResult.err.joinToString()}")
+                        Exception("Failed to set permissions for $displayName: ${errorMsg.ifEmpty { "unknown error" }}")
                     )
                 }
 
