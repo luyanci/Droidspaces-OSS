@@ -106,19 +106,20 @@ object BinaryInstaller {
                 val tempTargetPath = "$targetPath.tmp"
 
                 // Step 1: Copy from app cache to temp location in target directory (requires root)
-                val copyResult = Shell.cmd("cp ${tempFile.absolutePath} $tempTargetPath 2>&1").exec()
+                val copyResult = Shell.cmd("cp '${tempFile.absolutePath}' '$tempTargetPath'").exec()
                 if (!copyResult.isSuccess) {
                     tempFile.delete()
+                    val errorMsg = copyResult.err.joinToString() + copyResult.out.joinToString()
                     return Result.failure(
-                        Exception("Failed to copy $displayName to temp location: ${copyResult.err.joinToString()}")
+                        Exception("Failed to copy $displayName to temp location: ${errorMsg.ifEmpty { "unknown error" }}")
                     )
                 }
                 tempFile.delete() // Clean up app cache temp file
 
                 // Step 2: Set permissions on temp file (must be done before move)
-                val chmodResult = Shell.cmd("chmod 755 $tempTargetPath").exec()
+                val chmodResult = Shell.cmd("chmod 755 '$tempTargetPath'").exec()
                 if (!chmodResult.isSuccess) {
-                    Shell.cmd("rm -f $tempTargetPath").exec() // Clean up temp file
+                    Shell.cmd("rm -f '$tempTargetPath'").exec() // Clean up temp file
                     val errorMsg = chmodResult.err.joinToString() + chmodResult.out.joinToString()
                     return Result.failure(
                         Exception("Failed to set permissions for $displayName: ${errorMsg.ifEmpty { "unknown error" }}")
@@ -129,16 +130,17 @@ object BinaryInstaller {
                 // mv is atomic on the same filesystem - it just renames the inode
                 // This works even if the target binary is currently executing (no "text file busy" error)
                 onProgress(InstallationStep.SettingPermissions(targetPath))
-                val moveResult = Shell.cmd("mv -f $tempTargetPath $targetPath 2>&1").exec()
+                val moveResult = Shell.cmd("mv -f '$tempTargetPath' '$targetPath'").exec()
                 if (!moveResult.isSuccess) {
-                    Shell.cmd("rm -f $tempTargetPath 2>&1").exec() // Clean up temp file on failure
+                    Shell.cmd("rm -f '$tempTargetPath'").exec() // Clean up temp file on failure
+                    val errorMsg = moveResult.err.joinToString() + moveResult.out.joinToString()
                     return Result.failure(
-                        Exception("Failed to install $displayName: ${moveResult.err.joinToString()}")
+                        Exception("Failed to install $displayName: ${errorMsg.ifEmpty { "unknown error" }}")
                     )
                 }
 
                 // Step 4: Final permission check (mv preserves permissions, but ensure they're correct)
-                val verifyChmodResult = Shell.cmd("chmod 755 $targetPath 2>&1").exec()
+                val verifyChmodResult = Shell.cmd("chmod 755 '$targetPath'").exec()
                 if (!verifyChmodResult.isSuccess) {
                     // Non-fatal warning - permissions might already be correct
                     // Continue as the move succeeded
@@ -158,11 +160,11 @@ object BinaryInstaller {
 
             // Step 4: Verification
             onProgress(InstallationStep.Verifying("droidspaces"))
-            val verifyDroidspaces = Shell.cmd("test -x $droidspacesTargetPath && echo 'verified' || echo 'verification_failed'").exec()
+            val verifyDroidspaces = Shell.cmd("test -x '$droidspacesTargetPath' && echo 'verified' || echo 'verification_failed'").exec()
 
             if (!verifyDroidspaces.isSuccess || !verifyDroidspaces.out.any { it.contains("verified") }) {
                 return@withContext Result.failure(
-                    Exception("Droidspaces binary verification failed: file is not executable")
+                    Exception("Droidspaces binary verification failed: file is not executable at $droidspacesTargetPath")
                 )
             }
 
@@ -194,7 +196,7 @@ object BinaryInstaller {
      * Check if binaries are already installed
      */
     suspend fun isInstalled(): Boolean = withContext(Dispatchers.IO) {
-        val droidspacesResult = Shell.cmd("test -x $INSTALL_PATH/$DROIDSPACES_BINARY_NAME && echo 'installed' || echo 'not_installed'").exec()
+        val droidspacesResult = Shell.cmd("test -x '$INSTALL_PATH/$DROIDSPACES_BINARY_NAME' && echo 'installed' || echo 'not_installed'").exec()
         val droidspacesOk = droidspacesResult.isSuccess && droidspacesResult.out.any { it.contains("installed") }
 
         droidspacesOk

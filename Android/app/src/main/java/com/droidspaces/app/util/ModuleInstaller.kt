@@ -38,7 +38,7 @@ object ModuleInstaller {
 
             // Step 1: Remove old module directory
             onProgress(ModuleInstallationStep.RemovingOldModule(MAGISK_MODULE_PATH))
-            Shell.cmd("rm -rf '$MAGISK_MODULE_PATH' 2>&1").exec()
+            Shell.cmd("rm -rf '$MAGISK_MODULE_PATH'").exec()
 
             // Step 2: Extract all assets from boot-module to temp directory
             onProgress(ModuleInstallationStep.ExtractingAssets(tempDir.absolutePath))
@@ -84,19 +84,21 @@ object ModuleInstaller {
 
             // Step 3: Create module directory and copy everything
             onProgress(ModuleInstallationStep.CopyingModule(MAGISK_MODULE_PATH))
-            val mkdirResult = Shell.cmd("mkdir -p '$MAGISK_MODULE_PATH' 2>&1").exec()
+            val mkdirResult = Shell.cmd("mkdir -p '$MAGISK_MODULE_PATH'").exec()
             if (!mkdirResult.isSuccess) {
                 tempDir.deleteRecursively()
+                val errorMsg = mkdirResult.err.joinToString() + mkdirResult.out.joinToString()
                 return@withContext Result.failure(
-                    Exception("Failed to create module directory: ${mkdirResult.err.joinToString()}")
+                    Exception("Failed to create module directory: ${errorMsg.ifEmpty { "unknown error" }}")
                 )
             }
 
-            val copyResult = Shell.cmd("cp -arf '${tempDir.absolutePath}'/* '$MAGISK_MODULE_PATH/' 2>&1").exec()
+            val copyResult = Shell.cmd("cp -arf '${tempDir.absolutePath}'/* '$MAGISK_MODULE_PATH/'").exec()
             tempDir.deleteRecursively()
             if (!copyResult.isSuccess) {
+                val errorMsg = copyResult.err.joinToString() + copyResult.out.joinToString()
                 return@withContext Result.failure(
-                    Exception("Failed to copy module files: ${copyResult.err.joinToString()}")
+                    Exception("Failed to copy module files: ${errorMsg.ifEmpty { "unknown error" }}")
                 )
             }
 
@@ -112,25 +114,25 @@ object ModuleInstaller {
 
             // Step 5: Verify installation
             onProgress(ModuleInstallationStep.Verifying(MAGISK_MODULE_PATH))
-            val verifyDirResult = Shell.cmd("test -d '$MAGISK_MODULE_PATH' 2>&1").exec()
-            val verifyPropResult = Shell.cmd("test -f '$MODULE_PROP_PATH' 2>&1").exec()
+            val verifyDirResult = Shell.cmd("test -d '$MAGISK_MODULE_PATH'").exec()
+            val verifyPropResult = Shell.cmd("test -f '$MODULE_PROP_PATH'").exec()
 
             if (!verifyDirResult.isSuccess) {
                 return@withContext Result.failure(
-                    Exception("Module directory verification failed")
+                    Exception("Module directory verification failed at $MAGISK_MODULE_PATH")
                 )
             }
 
             if (!verifyPropResult.isSuccess) {
                 return@withContext Result.failure(
-                    Exception("module.prop verification failed")
+                    Exception("module.prop verification failed at $MODULE_PROP_PATH")
                 )
             }
 
-            val verifyTeResult = Shell.cmd("test -f '$MAGISK_MODULE_PATH/etc/droidspaces.te' 2>&1").exec()
+            val verifyTeResult = Shell.cmd("test -f '$MAGISK_MODULE_PATH/etc/droidspaces.te'").exec()
             if (!verifyTeResult.isSuccess) {
                 return@withContext Result.failure(
-                    Exception("droidspaces.te verification failed")
+                    Exception("droidspaces.te verification failed at $MAGISK_MODULE_PATH/etc/droidspaces.te")
                 )
             }
 
