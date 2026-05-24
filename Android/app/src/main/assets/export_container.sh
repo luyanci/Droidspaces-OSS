@@ -12,7 +12,6 @@ set -e
 
 DS_PATH="/data/local/Droidspaces"
 CONTAINERS_BASE_PATH="${DS_PATH}/Containers"
-BUSYBOX_PATH="${DS_PATH}/bin/busybox"
 
 # --- Logging ---
 log()   { echo "[INFO] $1"; }
@@ -41,13 +40,15 @@ trap cleanup EXIT
 trap 'error "Interrupted."; exit 1' INT TERM
 
 # --- Validate busybox ---
-if [ -x "$BUSYBOX_PATH" ]; then
-    BUSYBOX="$BUSYBOX_PATH"
-elif command -v busybox >/dev/null 2>&1; then
+# Prefer system busybox, fallback to bundled one
+if command -v busybox >/dev/null 2>&1; then
     BUSYBOX="busybox"
-    log "System busybox at fallback path: $(command -v busybox)"
+    log "Using system busybox: $(command -v busybox)"
+elif [ -x "${DS_PATH}/bin/busybox" ]; then
+    BUSYBOX="${DS_PATH}/bin/busybox"
+    log "Using bundled busybox: ${BUSYBOX}"
 else
-    error "busybox not found at $BUSYBOX_PATH and not in PATH. Aborting."
+    error "busybox not found in PATH or at ${DS_PATH}/bin/busybox. Aborting."
     exit 1
 fi
 

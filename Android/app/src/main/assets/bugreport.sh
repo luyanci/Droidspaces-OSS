@@ -8,7 +8,31 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 DROIDSPACE_DIR=/data/local/Droidspaces
-BUSYBOX="${DROIDSPACE_DIR}/bin/busybox"
+
+# Detect busybox - prefer system busybox, fallback to bundled one
+detect_busybox() {
+    # Try system busybox first
+    if command -v busybox >/dev/null 2>&1; then
+        echo "busybox"
+        return 0
+    fi
+    
+    # Fallback to bundled busybox
+    if [ -x "${DROIDSPACE_DIR}/bin/busybox" ]; then
+        echo "${DROIDSPACE_DIR}/bin/busybox"
+        return 0
+    fi
+    
+    return 1
+}
+
+BUSYBOX=$(detect_busybox)
+if [ -z "$BUSYBOX" ]; then
+    echo "ERROR: busybox not found in PATH or at ${DROIDSPACE_DIR}/bin/busybox"
+    echo "       Cannot generate bug report without it. Aborting."
+    exit 1
+fi
+
 LOGS_DIR="${DROIDSPACE_DIR}/Logs"
 DATE_TIME="$("${BUSYBOX}" date +"%Y-%m-%d_%H-%M-%S")"
 BUGREPORT_DIR="${LOGS_DIR}/bugreport_${DATE_TIME}"

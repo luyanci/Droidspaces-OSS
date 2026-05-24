@@ -8,11 +8,33 @@ set -e
 
 # Parameters
 ROOTFS_PATH="$1"
-BUSYBOX_PATH="${BUSYBOX_PATH:-/data/local/Droidspaces/bin/busybox}"
 
-# Check if BusyBox exists
-if [ ! -x "$BUSYBOX_PATH" ]; then
-    echo "[POST-FIX-ERROR] BusyBox not found or not executable at $BUSYBOX_PATH" >&2
+# Detect busybox - prefer system busybox, fallback to bundled one
+detect_busybox() {
+    # Try environment variable first
+    if [ -n "$BUSYBOX_PATH" ] && [ -x "$BUSYBOX_PATH" ]; then
+        echo "$BUSYBOX_PATH"
+        return 0
+    fi
+    
+    # Try system busybox
+    if command -v busybox >/dev/null 2>&1; then
+        echo "busybox"
+        return 0
+    fi
+    
+    # Fallback to bundled busybox
+    if [ -x "/data/local/Droidspaces/bin/busybox" ]; then
+        echo "/data/local/Droidspaces/bin/busybox"
+        return 0
+    fi
+    
+    return 1
+}
+
+BUSYBOX_PATH=$(detect_busybox)
+if [ -z "$BUSYBOX_PATH" ]; then
+    echo "[POST-FIX-ERROR] BusyBox not found in PATH or at /data/local/Droidspaces/bin/busybox" >&2
     exit 1
 fi
 

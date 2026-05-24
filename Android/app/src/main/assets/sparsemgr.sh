@@ -9,17 +9,22 @@
 
 SCRIPT_NAME="$(basename "$0")"
 
-# BusyBox Detection
+# BusyBox Detection - prefer system busybox, fallback to bundled one
 _find_busybox() {
+    # Try system busybox first (command -v is more portable than which)
+    local _p
+    _p="$(command -v busybox 2>/dev/null)"
+    if [ -n "$_p" ]; then
+        echo "$_p"
+        return
+    fi
+    
+    # Fallback to bundled busybox
     if [ -x "/data/local/Droidspaces/bin/busybox" ]; then
         echo "/data/local/Droidspaces/bin/busybox"
         return
     fi
-    local _p
-    _p="$(command -v busybox 2>/dev/null)"
-    [ -n "$_p" ] && { echo "$_p"; return; }
-    _p="$(which busybox 2>/dev/null)"
-    [ -n "$_p" ] && { echo "$_p"; return; }
+    
     echo ""
 }
 BB=$(_find_busybox)
